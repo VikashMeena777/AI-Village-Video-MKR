@@ -131,15 +131,22 @@ jobs:
           cd 07-HindiVillageReels
           python scripts/compose_scenes.py
       
+      - name: Install Rclone
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
+      
+      - name: Configure Rclone
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "${{ secrets.RCLONE_CONFIG }}" | base64 -d > ~/.config/rclone/rclone.conf
+      
       - name: Upload Final Reel to Google Drive
         if: success()
-        uses: adityak74/google-drive-upload-git-action@main
-        with:
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: "outputs/final/final_reel.mp4"
-          folderId: ${{ secrets.GDRIVE_FOLDER_ID }}
-          name: "hindi_village_reel_${{ github.run_id }}.mp4"
-          overwrite: "false"
+        run: |
+          FILENAME="hindi_village_reel_${{ github.run_id }}.mp4"
+          rclone copy outputs/final/final_reel.mp4 gdrive:${{ secrets.GDRIVE_FOLDER_PATH }} --progress
+          # Rename the uploaded file
+          rclone moveto gdrive:${{ secrets.GDRIVE_FOLDER_PATH }}/final_reel.mp4 gdrive:${{ secrets.GDRIVE_FOLDER_PATH }}/$FILENAME
       
       - name: Upload Artifacts (Backup)
         uses: actions/upload-artifact@v4
