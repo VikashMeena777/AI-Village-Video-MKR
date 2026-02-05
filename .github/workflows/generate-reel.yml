@@ -1,0 +1,162 @@
+name: Generate Hindi Village Reel
+
+on:
+  # Triggered by n8n webhook via repository_dispatch
+  repository_dispatch:
+    types: [generate-reel]
+  
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      script_json:
+        description: 'Script JSON (optional - will generate if empty)'
+        required: false
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  generate-reel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install edge-tts gradio_client requests
+      
+      - name: Create Output Directories
+        run: |
+          mkdir -p outputs/videos outputs/audio outputs/composed outputs/final
+      
+      - name: Get Script from Payload
+        id: get-script
+        run: |
+          # Check for script in different sources
+          if [ -n "${{ github.event.client_payload.script_json }}" ]; then
+            echo "Using script from repository_dispatch payload"
+            echo '${{ github.event.client_payload.script_json }}' > outputs/script.json
+          elif [ -n "${{ inputs.script_json }}" ]; then
+            echo "Using script from workflow_dispatch input"
+            echo '${{ inputs.script_json }}' > outputs/script.json
+          else
+            echo "No script provided, generating sample..."
+            cat > outputs/script.json << 'EOF'
+          {
+            "scenes": [
+              {
+                "scene_id": 1,
+                "emotion": "conflict",
+                "location": "village_chowk",
+                "dialogues": [
+                  {"character": "baap", "text": "Tujhe dekh kar sharm aati hai mujhe!"},
+                  {"character": "gav_wale", "text": "Iska koi kaam nahi hai duniya mein."}
+                ]
+              },
+              {
+                "scene_id": 2,
+                "emotion": "sadness",
+                "location": "ghar_aangan",
+                "dialogues": [
+                  {"character": "maa", "text": "Beta, sabr rakh. Waqt badlega."},
+                  {"character": "behen", "text": "Bhaiya, mat suno inki baatein."}
+                ]
+              },
+              {
+                "scene_id": 3,
+                "emotion": "anger_building",
+                "location": "khet",
+                "dialogues": [
+                  {"character": "dost", "text": "Yaar, kab tak chup rahega tu?"},
+                  {"character": "gav_wale", "text": "Isko toh bolna bhi nahi aata!"}
+                ]
+              },
+              {
+                "scene_id": 4,
+                "emotion": "rage",
+                "location": "panchayat_ground",
+                "dialogues": [
+                  {"character": "hero", "text": "Bahut ho gaya! Ab aur nahi!"}
+                ]
+              },
+              {
+                "scene_id": 5,
+                "emotion": "shock",
+                "location": "village_chowk",
+                "dialogues": [
+                  {"character": "gav_wale", "text": "Yeh... yeh kya ho gaya isko?"},
+                  {"character": "baap", "text": "Beta... maaf kar de mujhe."}
+                ]
+              }
+            ]
+          }
+          EOF
+          fi
+          
+          echo "Script saved to outputs/script.json"
+          cat outputs/script.json
+      
+      - name: Generate Videos (HuggingFace)
+        env:
+          SCRIPT_JSON: ${{ toJson(github.event.client_payload.script_json) }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          cd 07-HindiVillageReels
+          python scripts/generate_videos.py
+        continue-on-error: true
+      
+      - name: Generate TTS Audio (Edge TTS)
+        run: |
+          cd 07-HindiVillageReels
+          python scripts/generate_tts.py
+      
+      - name: Compose & Merge Scenes (FFmpeg)
+        run: |
+          cd 07-HindiVillageReels
+          python scripts/compose_scenes.py
+      
+      - name: Upload Final Reel to Google Drive
+        if: success()
+        uses: adityak74/google-drive-upload-git-action@main
+        with:
+          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
+          filename: "outputs/final/final_reel.mp4"
+          folderId: ${{ secrets.GDRIVE_FOLDER_ID }}
+          name: "hindi_village_reel_${{ github.run_id }}.mp4"
+          overwrite: "false"
+      
+      - name: Upload Artifacts (Backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel-outputs-${{ github.run_id }}
+          path: |
+            outputs/final/
+            outputs/audio/
+          retention-days: 7
+      
+      - name: Notify n8n (Optional)
+        if: always()
+        run: |
+          if [ -n "${{ secrets.N8N_CALLBACK_URL }}" ]; then
+            STATUS="${{ job.status }}"
+            curl -X POST "${{ secrets.N8N_CALLBACK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"status\": \"$STATUS\", \"run_id\": \"${{ github.run_id }}\"}" \
+              || true
+          fi
