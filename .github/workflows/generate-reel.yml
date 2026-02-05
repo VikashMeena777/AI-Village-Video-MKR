@@ -116,20 +116,14 @@ jobs:
         env:
           SCRIPT_JSON: ${{ toJson(github.event.client_payload.script_json) }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          cd 07-HindiVillageReels
-          python scripts/generate_videos.py
+        run: python scripts/generate_videos.py
         continue-on-error: true
       
       - name: Generate TTS Audio (Edge TTS)
-        run: |
-          cd 07-HindiVillageReels
-          python scripts/generate_tts.py
+        run: python scripts/generate_tts.py
       
       - name: Compose & Merge Scenes (FFmpeg)
-        run: |
-          cd 07-HindiVillageReels
-          python scripts/compose_scenes.py
+        run: python scripts/compose_scenes.py
       
       - name: Install Rclone
         run: |
